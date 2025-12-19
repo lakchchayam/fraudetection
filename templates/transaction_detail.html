@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Transaction Details #{{ tx.transaction.id }}</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background: radial-gradient(circle at top left, #1f2937 0, #020617 50%);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            color: #e5e7eb;
+            border-radius: 8px;
+            box-shadow: 0 18px 45px rgba(0, 0, 0, 0.55);
+            margin-bottom: 20px;
+        }
+
+        .risk-score-large {
+            text-align: right;
+        }
+
+        .score-val {
+            font-size: 2.5rem;
+            font-weight: bold;
+        }
+
+        .grid-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .panel {
+            background: radial-gradient(circle at top left, #1f2937 0, #020617 50%);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 18px 45px rgba(0, 0, 0, 0.55);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            color: #d1d5db;
+        }
+
+        .panel h3 {
+            color: #9ca3af;
+            text-transform: uppercase;
+            font-size: 0.9rem;
+            margin-top: 0;
+        }
+
+        #network-graph {
+            height: 400px;
+            border: 1px solid rgba(55, 65, 81, 0.5);
+            background: rgba(15, 23, 42, 0.5);
+        }
+    </style>
+</head>
+
+<body>
+    <header class="top-bar">
+        <h1><a href="/dashboard" style="color: white; text-decoration: none;">&larr; Risk Dashboard</a> / Transaction
+            #{{ tx.transaction.id }}</h1>
+    </header>
+
+    <main class="layout">
+        <div class="detail-header">
+            <div>
+                <h2>External ID: {{ tx.transaction.external_id }}</h2>
+                <p>Status:
+                    {% set dec = (tx.decision or 'PENDING').lower() %}
+                    <span
+                        class="badge badge--{{ 'allow' if dec == 'allow' else 'review' if dec == 'review' else 'block' if dec == 'block' else '' }}">
+                        {{ tx.decision }}
+                    </span>
+                </p>
+            </div>
+            <div class="risk-score-large">
+                <div class="score-val"
+                    style="color: {{ 'red' if (tx.transaction.ml_score or 0) > 80 else 'orange' if (tx.transaction.ml_score or 0) > 50 else 'green' }};">
+                    {{ tx.transaction.ml_score or 0 }}
+                </div>
+                <small>ML Fraud Probability</small>
+            </div>
+        </div>
+
+        <div class="grid-layout">
+            <section class="panel">
+                <h3>Transaction Metadata</h3>
+                <table class="table">
+                    <tr>
+                        <th>Account ID</th>
+                        <td>{{ tx.transaction.account_id }}</td>
+                    </tr>
+                    <tr>
+                        <th>Amount</th>
+                        <td>{{ "%.2f"|format(tx.transaction.amount) }} {{ tx.transaction.currency }}</td>
+                    </tr>
+                    <tr>
+                        <th>Merchant</th>
+                        <td>{{ tx.transaction.merchant_id }}</td>
+                    </tr>
+                    <tr>
+                        <th>IP Address</th>
+                        <td>{{ tx.transaction.ip_address or "N/A" }}</td>
+                    </tr>
+                    <tr>
+                        <th>Location</th>
+                        <td>{{ tx.transaction.country or "Unknown" }}</td>
+                    </tr>
+                    <tr>
+                        <th>Time</th>
+                        <td>{{ tx.transaction.created_at }}</td>
+                    </tr>
+                </table>
+            </section>
+
+            <section class="panel">
+                <h3>Risk Dimensions (Why?)</h3>
+                <canvas id="radarChart"></canvas>
+            </section>
+        </div>
+
+        <section class="panel">
+            <h3>Link Analysis (Fraud Ring Detection)</h3>
+            <p>Visualizing connections for Account: <strong>{{ tx.transaction.account_id }}</strong></p>
+            <div id="network-graph"></div>
+        </section>
+
+        <section class="panel">
+            <h3>Rule Execution History</h3>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Rule Code</th>
+                        <th>Version</th>
+                        <th>Decision</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rule in tx.rules_fired %}
+                    <tr>
+                        <td>{{ rule.code }}</td>
+                        <td>{{ rule.version }}</td>
+                        <td>{{ rule.decision }}</td>
+                        <td>{{ rule.details }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4">No rules triggered.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        // 1. Radar Chart
+        const ctx = document.getElementById('radarChart').getContext('2d');
+        const score = {{ tx.transaction.ml_score or 0 }};
+        const amountFactor = Math.min({{ tx.transaction.amount }} / 1000 * 10, 100);
+
+        new Chart(ctx, {
+            type: 'radar',
+            data: {
+                labels: ['Amount Risk', 'Velocity Risk', 'Device Risk', 'Network Risk', 'History Risk'],
+                datasets: [{
+                    label: 'Risk Profile',
+                    data: [
+                        amountFactor,
+                        score > 50 ? score - 10 : 20,
+                        Math.random() * 40,
+                        Math.random() * 60,
+                        Math.random() * 30
+                    ], // Simulated breakdown
+                    fill: true,
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    borderColor: 'rgb(255, 99, 132)',
+                    pointBackgroundColor: 'rgb(255, 99, 132)',
+                    pointBorderColor: '#fff',
+                    pointHoverBackgroundColor: '#fff',
+                    pointHoverBorderColor: 'rgb(255, 99, 132)'
+                }]
+            },
+            options: {
+                elements: { line: { borderWidth: 3 } },
+                scales: { r: { suggestedMin: 0, suggestedMax: 100 } }
+            }
+        });
+
+        // 2. Network Graph (Vis.js)
+        const nodes = new vis.DataSet([
+            { id: 1, label: 'Current Account\n{{ tx.transaction.account_id }}', shape: 'box', color: '#ffcccc' },
+            { id: 2, label: 'Merchant\n{{ tx.transaction.merchant_id }}', shape: 'ellipse' },
+            { id: 3, label: 'IP Address\n{{ tx.transaction.ip_address or "192.168.1.1" }}', shape: 'ellipse' },
+            { id: 4, label: 'Linked Acct\n(Suspicious)', shape: 'box', color: '#ffaaaa' },
+            { id: 5, label: 'Device ID\nXYZ-123', shape: 'ellipse' }
+        ]);
+
+        const edges = new vis.DataSet([
+            { from: 1, to: 2, label: 'transacted' },
+            { from: 1, to: 3, label: 'login' },
+            { from: 4, to: 3, label: 'login (match)' },
+            { from: 1, to: 5, label: 'device' },
+            { from: 4, to: 2, label: 'transacted' }
+        ]);
+
+        const container = document.getElementById('network-graph');
+        const data = { nodes: nodes, edges: edges };
+        const options = {};
+        new vis.Network(container, data, options);
+    </script>
+</body>
+
+</html>
